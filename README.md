@@ -13,7 +13,7 @@ tenants. Lowest-risk, fastest-to-revenue of the three systems.
 
 The client flow runs end to end: onboard a tenant, derive its Business DNA, pull
 market intelligence, generate on-brand assets, park them for human review, and
-distribute on an approved schedule. **26 tests passing.**
+distribute on an approved schedule. **39 tests passing.**
 
 What is real vs. scaffolded:
 
@@ -24,11 +24,17 @@ What is real vs. scaffolded:
 | Content generation + quality gate | Built |
 | Human approval gate (park / approve+schedule / reject) | Built |
 | Distribution — dry-run adapter | Built; produces the real request shape without a network call |
-| Distribution — Ayrshare / Buffer adapters | **Scaffolds.** Correct call shape, no live request yet |
-| Performance loop (analytics feeding back into generation) | **Not built** |
+| Distribution — Ayrshare adapter | **Built (live).** Real `POST /api/post` + analytics; degrades to `ok=False` with no key |
+| Distribution — X (direct) adapter | **Built (live).** Direct `POST /2/tweets`, text posts — no aggregator subscription (In-House Roadmap Phase 4) |
+| Distribution — Buffer adapter | Scaffold. Correct call shape, no live request yet |
+| Performance loop (analytics feeding back into generation) | **Built.** `analytics.py` store + `ingest-metrics` → per-type engagement summary → generation `pulse_context` |
 
-That last row is the honest gap: the loop is designed but the analytics ingest
-does not exist yet, so today the system is open-loop.
+The system is now **closed-loop**: published posts are registered, their metrics
+pulled back via `rainmaker ingest-metrics`, aggregated per asset type, and fed
+into the next cycle's generation as a performance hint. A tenant with no measured
+posts yet produces an empty hint, so early cycles behave exactly as before.
+Ayrshare is the shortest path to going live (one key, every network); the direct
+X adapter is the zero-subscription path for text posts. Buffer remains a scaffold.
 
 ### Provider-agnostic, keyless-capable LLM
 
@@ -43,11 +49,12 @@ to templates rather than failing. See `FREE_LLM_SETUP.md`.
 ```
 src/core/          shared settlement + queue + worker engine (product-agnostic)
 src/rainmaker/     onboarding, dna, market_pulse, content (+ quality gate),
-                   generation, review, orchestrator, pipeline, cli,
-                   distribution/ (base, dryrun, ayrshare, buffer)
+                   generation, review, orchestrator, pipeline, cli, analytics
+                   (performance loop),
+                   distribution/ (base, dryrun, ayrshare, x, buffer, _http)
 docs/              architecture (00-overview, 01-core, 02-rainmaker),
                    03-client-flow, ADRs
-tests/             26 tests
+tests/             39 tests
 ```
 
 ## Quickstart
@@ -64,15 +71,17 @@ runs as a `core` worker kind, inheriting queueing, retries, billing, and audit.
 
 ## Next steps
 
-1. **Make one distribution adapter real.** Ayrshare is the shortest path — the call
-   shape is already written; it needs credentials and live error handling.
-2. **Close the performance loop.** Ingest post-level analytics and feed them back
-   into the market-pulse and content stages. This is the largest missing piece and
-   the one the pitch leans on hardest.
-3. **Run a real tenant end to end** rather than fixtures — onboarding through to a
-   scheduled, published post.
+1. ~~Make one distribution adapter real.~~ **Done** — Ayrshare (live multi-network)
+   and a direct X adapter both make real API calls with graceful degradation.
+2. ~~Close the performance loop.~~ **Done** — `analytics.py` + `ingest-metrics`
+   pull post metrics back and feed a per-type performance hint into generation.
+3. **Run a real tenant end to end** with live credentials — onboarding through to a
+   scheduled, published post, then `ingest-metrics` on a schedule to warm the loop.
 4. **Multi-tenant scheduling.** A runner exists for sweeping all tenants; it needs
-   to be committed and put on a schedule.
+   to be committed and put on a schedule (pairs naturally with periodic
+   `ingest-metrics`).
+5. **Broaden direct adapters.** X covers text today; port Relay's media-upload flow
+   for image/video posts, and add direct LinkedIn/Meta to further shed Ayrshare.
 
 ---
 
